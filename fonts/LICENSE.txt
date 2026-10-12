@@ -1,0 +1,10 @@
+SoundReportHei-Regular.ttf / SoundReportHei-Bold.ttf
+
+這兩個字型檔是從 Noto Sans CJK TC（思源黑體繁體中文）擷取部分字元並轉換格式而成，
+依 SIL Open Font License 1.1 授權，可自由使用、嵌入與散布。
+
+Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+Noto is a trademark of Google Inc.
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+The full license text is available at: https://openfontlicense.org
