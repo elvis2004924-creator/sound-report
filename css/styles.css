@@ -65,7 +65,7 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; height: 100%; }
+html, body { margin: 0; height: 100%; touch-action: pan-x pan-y; }
 body {
   background: var(--bg);
   color: var(--text);
@@ -268,8 +268,12 @@ input, textarea { font: inherit; color: inherit; }
 .mini-list { font-size: 13px; color: var(--text-2); padding: 0 16px 12px 50px; line-height: 1.6; }
 
 /* PDF 預覽 */
-.pdf-pages { padding: 12px 12px calc(var(--safe-bottom) + 30px); display: grid; gap: 12px; justify-items: center; background: var(--card-2); flex: 1; overflow: auto; }
-.pdf-pages img { width: 100%; max-width: 1000px; box-shadow: 0 1px 6px rgba(0,0,0,.25); background: #fff; display: block; }
+.sheet-body.pdf-body { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; position: relative; }
+.pdf-pages { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; background: var(--card-2); padding: 12px 12px calc(var(--safe-bottom) + 30px); touch-action: pan-x pan-y; overscroll-behavior: contain; }
+.pdf-inner { display: grid; gap: 12px; margin: 0 auto; }
+.pdf-pages img { width: 100%; box-shadow: 0 1px 6px rgba(0,0,0,.25); background: #fff; display: block; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.pdf-hint { position: absolute; left: 50%; bottom: calc(var(--safe-bottom) + 18px); transform: translateX(-50%); background: rgba(30,30,30,.85); color: #fff; font-size: 13px; padding: 7px 12px; border-radius: 999px; pointer-events: none; transition: opacity .6s; white-space: nowrap; }
+.pdf-hint.fade { opacity: 0; }
 .progress { padding: 60px 20px; text-align: center; color: var(--text-2); }
 .progress .bar { width: 220px; height: 6px; background: var(--fill); border-radius: 3px; margin: 14px auto 0; overflow: hidden; }
 .progress .bar i { display: block; height: 100%; background: var(--blue); width: 0; transition: width .15s; }

@@ -235,8 +235,23 @@ export async function generateSoundReport(project, onProgress) {
     onProgress?.(i + 1, pageOps.length);
     if (i % 3 === 2) await new Promise(r => setTimeout(r, 0));
   }
+  const previewWidthPx = canvas.width;
   canvas.width = canvas.height = 0;
-  return { blob, previews, pageCount: total };
+
+  /** 放大時用：依需要的像素寬度重新畫一頁（最寬 4096px，避免手機記憶體不足） */
+  const renderPreview = async (i, pxWidth) => {
+    const w = Math.min(4096, Math.max(400, Math.round(pxWidth)));
+    const s = w / PAGE_W;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = Math.round(PAGE_H * s);
+    const x = c.getContext('2d');
+    x.setTransform(s, 0, 0, s, 0, 0);
+    drawOpsToCanvas(x, pageOps[i]);
+    const out = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+    c.width = c.height = 0;
+    return URL.createObjectURL(out);
+  };
+  return { blob, previews, pageCount: total, previewWidth: previewWidthPx, renderPreview };
 }
 
 let previewFontsReady = null;

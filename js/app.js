@@ -884,14 +884,16 @@ async function openPDF() {
   const p = selectedProject();
   let result = null;
   const fileName = `${safeFileName(p.info.title || p.name)}_聲音報表_${stamp()}.pdf`;
-  const cleanup = () => result?.previews.forEach(u => URL.revokeObjectURL(u));
+  let viewer = null;
+  const cleanup = () => { result?.previews.forEach(u => URL.revokeObjectURL(u)); viewer?.destroy(); };
   const sheet = openSheet({
     title: '聲音報告預覽',
     left: { label: '關閉', action: () => { cleanup(); closeSheet(); } },
     right: { label: `${ICON.share}`, action: share },
     onBackdrop: () => { cleanup(); closeSheet(); },
-    body: `<div class="progress" id="pdf-progress">正在產生 PDF…<div class="bar"><i></i></div></div><div class="pdf-pages hidden" id="pdf-pages"></div>`,
+    body: `<div class="progress" id="pdf-progress">正在產生 PDF…<div class="bar"><i></i></div></div><div class="pdf-pages hidden" id="pdf-pages"><div class="pdf-inner"></div></div><div class="pdf-hint hidden" id="pdf-hint">雙指縮放或點兩下放大</div>`,
   });
+  $('.sheet-body', sheet).classList.add('pdf-body');
   const shareBtn = $('[data-sheet="right"]', sheet);
   shareBtn.disabled = true;
   shareBtn.setAttribute('aria-label', '分享 PDF');
@@ -905,7 +907,10 @@ async function openPDF() {
     $('#pdf-progress', sheet).classList.add('hidden');
     const pages = $('#pdf-pages', sheet);
     pages.classList.remove('hidden');
-    pages.innerHTML = result.previews.map((u, i) => `<img src="${u}" alt="第 ${i + 1} 頁">`).join('');
+    $('#pdf-hint', sheet).classList.remove('hidden');
+    setTimeout(() => $('#pdf-hint', sheet)?.classList.add('fade'), 2500);
+    $('.pdf-inner', pages).innerHTML = result.previews.map((u, i) => `<img src="${u}" alt="第 ${i + 1} 頁" data-i="${i}" draggable="false">`).join('');
+    viewer = createZoomViewer(pages, result);
     shareBtn.disabled = false;
   } catch (e) {
     console.error(e);
@@ -917,6 +922,149 @@ async function openPDF() {
     const file = new File([result.blob], fileName, { type: 'application/pdf' });
     await shareFile(file);
   }
+}
+
+// MARK: - PDF 預覽縮放（只縮放 PDF，不縮放整個畫面；放大後重新畫成高解析度）
+
+function createZoomViewer(scroller, result) {
+  const inner = $('.pdf-inner', scroller);
+  const imgs = $$('img', inner);
+  const MIN = 1, MAX = 6;
+  let zoom = 1;
+  let pinch = null;
+  let hiresTimer = null;
+  const hires = new Map(); // 頁碼 -> { url, width }
+
+  const baseWidth = () => Math.min(scroller.clientWidth - 24, 1000);
+  const applyZoom = () => { inner.style.width = `${baseWidth() * zoom}px`; };
+  applyZoom();
+
+  const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  const mid = (a, b) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 });
+  // 螢幕座標 → 內容座標（以 .pdf-inner 左上角為原點）
+  const toContent = (cx, cy) => {
+    const r = inner.getBoundingClientRect();
+    return { x: cx - r.left, y: cy - r.top };
+  };
+  // 讓內容上的某一點 (px, py) 對齊到螢幕位置 (cx, cy)
+  const alignPoint = (px, py, cx, cy) => {
+    const r = inner.getBoundingClientRect();
+    scroller.scrollLeft += (r.left + px) - cx;
+    scroller.scrollTop += (r.top + py) - cy;
+  };
+
+  function zoomTo(newZoom, cx, cy) {
+    newZoom = Math.min(MAX, Math.max(MIN, newZoom));
+    const p = toContent(cx, cy);
+    const k = newZoom / zoom;
+    zoom = newZoom;
+    applyZoom();
+    alignPoint(p.x * k, p.y * k, cx, cy);
+    scheduleHires();
+  }
+
+  function onTouchStart(e) {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const m = mid(e.touches[0], e.touches[1]);
+      const p = toContent(m.x, m.y);
+      pinch = { d0: dist(e.touches[0], e.touches[1]), z0: zoom, m0: m, p, k: 1, m };
+      inner.style.transformOrigin = '0 0';
+    }
+  }
+  function onTouchMove(e) {
+    if (!pinch || e.touches.length !== 2) return;
+    e.preventDefault();
+    const m = mid(e.touches[0], e.touches[1]);
+    let z = pinch.z0 * dist(e.touches[0], e.touches[1]) / pinch.d0;
+    z = Math.min(MAX * 1.15, Math.max(MIN * 0.85, z));
+    const k = z / pinch.z0;
+    pinch.k = k; pinch.m = m;
+    // 手指中間那一點保持在手指下方，同時可以拖著移動
+    const tx = pinch.p.x * (1 - k) + (m.x - pinch.m0.x);
+    const ty = pinch.p.y * (1 - k) + (m.y - pinch.m0.y);
+    inner.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`;
+  }
+  function onTouchEnd(e) {
+    if (!pinch || e.touches.length >= 2) return;
+    const { z0, k, p, m } = pinch;
+    pinch = null;
+    inner.style.transform = '';
+    const target = Math.min(MAX, Math.max(MIN, z0 * k));
+    const kk = target / z0;
+    zoom = target;
+    applyZoom();
+    alignPoint(p.x * kk, p.y * kk, m.x, m.y);
+    scheduleHires();
+  }
+
+  // 點兩下：放大到 2.5 倍／縮回原尺寸
+  let lastTap = 0, lastXY = null;
+  function onTap(e) {
+    if (e.pointerType === 'mouse') return;
+    const now = Date.now();
+    if (now - lastTap < 300 && lastXY && Math.hypot(e.clientX - lastXY.x, e.clientY - lastXY.y) < 30) {
+      zoomTo(zoom > 1.2 ? 1 : 2.5, e.clientX, e.clientY);
+      lastTap = 0;
+    } else { lastTap = now; lastXY = { x: e.clientX, y: e.clientY }; }
+  }
+  // 電腦：Ctrl＋滾輪，或觸控板雙指縮放
+  function onWheel(e) {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    zoomTo(zoom * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+  }
+
+  function scheduleHires() {
+    clearTimeout(hiresTimer);
+    hiresTimer = setTimeout(updateHires, 250);
+  }
+  async function updateHires() {
+    const dpr = window.devicePixelRatio || 1;
+    const view = scroller.getBoundingClientRect();
+    for (const img of imgs) {
+      const i = +img.dataset.i;
+      const r = img.getBoundingClientRect();
+      const visible = r.bottom > view.top - view.height && r.top < view.bottom + view.height;
+      const need = img.clientWidth * dpr;
+      const have = hires.get(i)?.width || result.previewWidth;
+      if (visible && need > have * 1.15 && have < 4096) {
+        const url = await result.renderPreview(i, need);
+        if (!scroller.isConnected) { URL.revokeObjectURL(url); return; }
+        const old = hires.get(i);
+        hires.set(i, { url, width: Math.min(4096, need) });
+        img.src = url;
+        if (old) setTimeout(() => URL.revokeObjectURL(old.url), 1000);
+      } else if (!visible && hires.has(i)) {
+        // 看不到的頁面換回低解析度，節省記憶體
+        const old = hires.get(i);
+        hires.delete(i);
+        img.src = result.previews[i];
+        setTimeout(() => URL.revokeObjectURL(old.url), 1000);
+      }
+    }
+  }
+
+  scroller.addEventListener('touchstart', onTouchStart, { passive: false });
+  scroller.addEventListener('touchmove', onTouchMove, { passive: false });
+  scroller.addEventListener('touchend', onTouchEnd);
+  scroller.addEventListener('touchcancel', onTouchEnd);
+  scroller.addEventListener('pointerup', onTap);
+  scroller.addEventListener('wheel', onWheel, { passive: false });
+  scroller.addEventListener('scroll', () => { if (zoom > 1) scheduleHires(); });
+  const onResize = () => { applyZoom(); scheduleHires(); };
+  window.addEventListener('resize', onResize);
+
+  return {
+    zoomTo,
+    get zoom() { return zoom; },
+    destroy() {
+      clearTimeout(hiresTimer);
+      window.removeEventListener('resize', onResize);
+      hires.forEach(h => URL.revokeObjectURL(h.url));
+      hires.clear();
+    },
+  };
 }
 
 // MARK: - 分享／下載檔案
@@ -1220,6 +1368,10 @@ async function init() {
     if (w !== wide) { wide = w; render(); }
   });
 }
+
+// 整個畫面禁止雙指縮放與點兩下縮放（PDF 預覽有自己的縮放）
+['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));
+document.addEventListener('touchmove', e => { if (e.touches.length > 1 && !e.target.closest?.('.pdf-pages')) e.preventDefault(); }, { passive: false });
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
