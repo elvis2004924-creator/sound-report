@@ -1,6 +1,6 @@
 // 離線快取：第一次打開後，整個 App 都存在手機上，之後沒有網路也能使用。
 // 每次更新程式時，請把下面的版本號加 1，手機才會下載新版。
-const VERSION = 'soundreport-v1.3.2';
+const VERSION = 'soundreport-v1.3.3';
 const FILES = [
   './',
   'index.html',

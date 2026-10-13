@@ -1,6 +1,6 @@
 // 聲音報表 — 資料模型與核心邏輯（由 Models.swift 移植）
 
-export const APP_VERSION = '1.3.2';
+export const APP_VERSION = '1.3.3';
 export const TRACK_COUNT = 8;
 
 export function uuid() {

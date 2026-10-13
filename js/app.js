@@ -53,6 +53,8 @@ const ICON = {
   folder: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 6.5A2.5 2.5 0 0 1 4.5 4h4.6l2.2 2.4h8.2A2.5 2.5 0 0 1 22 8.9V18a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 18z"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20"/></svg>',
   grip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 8h16M4 12h16M4 16h16"/></svg>',
+  homeAdd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8.5v7M8.5 12h7"/></svg>',
+  iosShare: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M7 10H5.5v11h13V10H17"/></svg>',
   warn: '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M12 2.5 1.5 21h21zM11 9h2v6h-2zm0 8h2v2h-2z"/></svg>',
 };
 
@@ -81,6 +83,7 @@ function sidebarHTML() {
       <div class="title">音記表專案</div>
     </header>
     <div class="scroll">
+      ${installCardHTML()}
       ${state.projects.length ? `<div class="list-group">${rows}</div>` : `
         <div class="empty"><div class="icon">${ICON.film}</div><h3>還沒有專案</h3><p>按右上角的「＋」建立第一個專案，<br>或從下方匯入交接檔。</p></div>`}
       <div class="section-title">交接與備份</div>
@@ -88,6 +91,7 @@ function sidebarHTML() {
         <button class="list-row action-row" data-act="import">${ICON.import}<span class="main">匯入交接檔／備份</span></button>
         <button class="list-row action-row" data-act="backup-all" ${state.projects.length ? '' : 'disabled style="opacity:.4"'}>${ICON.archive}<span class="main">備份全部專案</span></button>
         <button class="list-row action-row" data-act="snapshots">${ICON.clock}<span class="main">自動備份紀錄</span></button>
+        ${isStandalone() ? '' : `<button class="list-row action-row" data-act="install-help">${ICON.homeAdd}<span class="main">加到主畫面教學</span></button>`}
       </div>
       <div class="section-foot">所有資料只存在這支手機上，沒有網路也能使用。建議每天收工時備份一次。<br>聲音報表 v${APP_VERSION}</div>
     </div>`;
@@ -104,6 +108,9 @@ function bindSidebar() {
     if (act === 'import') return $('#import-input').click();
     if (act === 'backup-all') return exportAll();
     if (act === 'snapshots') return openSnapshots();
+    if (act === 'install-help') return openInstallHelp();
+    if (act === 'install-dismiss') { setInstallDismissed(true); return render(); }
+    if (act === 'install-now') return promptInstall();
     const row = e.target.closest('[data-project]');
     if (row && !state.editProjects) {
       if (state.selectedProjectID !== row.dataset.project) { state.searchText = ''; state.editTakes = false; }
@@ -114,6 +121,97 @@ function bindSidebar() {
       $('.detail .scroll')?.scrollTo(0, 0);
     }
   });
+}
+
+// MARK: - 加到主畫面提示（只在瀏覽器裡打開時顯示）
+
+const INSTALL_KEY = 'soundReport.installHintDismissed';
+let deferredInstall = null; // Android／電腦 Chrome 的安裝提示
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; render(); });
+window.addEventListener('appinstalled', () => { deferredInstall = null; render(); });
+
+function isStandalone() {
+  return window.navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches;
+}
+function installDismissed() { try { return localStorage.getItem(INSTALL_KEY) === '1'; } catch { return false; } }
+function setInstallDismissed(v) { try { v ? localStorage.setItem(INSTALL_KEY, '1') : localStorage.removeItem(INSTALL_KEY); } catch {} }
+
+function platformInfo() {
+  const ua = navigator.userAgent || '';
+  const iOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const android = /Android/.test(ua);
+  const inApp = /Line\/|FBAN|FBAV|Instagram|MicroMessenger/i.test(ua);
+  const iosSafari = iOS && !inApp && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
+  return { iOS, android, inApp, iosSafari };
+}
+
+function installStepsHTML() {
+  const p = platformInfo();
+  if (p.inApp) {
+    return `<p>你現在是在 App 內建的瀏覽器裡（例如 LINE）。請先點右上角的選單，選「<b>用預設瀏覽器開啟</b>」或「<b>在 Safari 中開啟</b>」，再照著畫面上的步驟加到主畫面。</p>`;
+  }
+  if (p.iOS && !p.iosSafari) {
+    return `<p>在 iPhone 上，請改用 <b>Safari</b> 打開這個網址，再按「分享」${ICON.iosShare}→「<b>加入主畫面</b>」。</p>`;
+  }
+  if (p.iOS) {
+    return `<ol class="steps">
+      <li>按畫面下方（或上方網址列旁）的「分享」按鈕 ${ICON.iosShare}</li>
+      <li>往下滑，選「<b>加入主畫面</b>」</li>
+      <li>按右上角「<b>加入</b>」</li>
+      <li>之後都從主畫面的「聲音報表」圖示打開</li>
+    </ol>`;
+  }
+  if (p.android) {
+    return deferredInstall
+      ? `<p>按下方的「安裝 App」，之後從主畫面的「聲音報表」圖示打開。</p>`
+      : `<ol class="steps"><li>用 <b>Chrome</b> 打開這個網址</li><li>按右上角「⋮」選單</li><li>選「<b>加到主畫面</b>」或「<b>安裝應用程式</b>」</li></ol>`;
+  }
+  return deferredInstall
+    ? `<p>按下方的「安裝 App」，之後就能像一般程式一樣從桌面或 Dock 打開。</p>`
+    : `<p>Chrome／Edge：按網址列右邊的「安裝」圖示。<br>Mac Safari：選單列「檔案」→「<b>加入 Dock</b>」。</p>`;
+}
+
+function installCardHTML() {
+  if (isStandalone() || installDismissed()) return '';
+  return `
+    <div class="install-card">
+      <div class="install-head">${ICON.homeAdd}<b>先把「聲音報表」加到主畫面</b></div>
+      <p class="install-why">加到主畫面後，沒有訊號也能打開，資料也不會因為一陣子沒用而被 Safari 清掉。</p>
+      ${installStepsHTML()}
+      <div class="install-actions">
+        ${deferredInstall ? `<button class="install-primary" data-act="install-now">安裝 App</button>` : ''}
+        <button class="install-dismiss" data-act="install-dismiss">知道了</button>
+      </div>
+    </div>`;
+}
+
+async function promptInstall() {
+  if (!deferredInstall) return openInstallHelp();
+  deferredInstall.prompt();
+  try { await deferredInstall.userChoice; } catch {}
+  deferredInstall = null;
+  render();
+}
+
+function openInstallHelp() {
+  const sheet = openSheet({
+    title: '加到主畫面',
+    right: { label: '完成', bold: true, action: closeSheet },
+    body: `<div class="form">
+      <div class="notice blue">${installStepsHTML()}</div>
+      <div class="section-title">為什麼要加到主畫面</div>
+      <div class="form-group">
+        <div class="kv"><span class="k">離線使用</span><span class="v">沒有訊號也能打開、記錄、匯出 PDF</span></div>
+        <div class="kv"><span class="k">資料保存</span><span class="v">不會因為 7 天沒打開就被 Safari 清掉</span></div>
+        <div class="kv"><span class="k">全螢幕</span><span class="v">沒有網址列，畫面比較大</span></div>
+      </div>
+      <div class="section-foot">注意：Safari 網頁和主畫面 App 的資料是分開存的。如果已經在 Safari 裡記過資料，請先用「備份全部專案」存檔，再到主畫面 App 裡「匯入交接檔／備份」。</div>
+      ${deferredInstall ? `<button class="primary-btn" id="ih-install">${ICON.homeAdd}安裝 App</button>` : ''}
+      ${installDismissed() ? `<button class="primary-btn secondary" id="ih-show">在專案列表重新顯示提示</button>` : ''}
+    </div>`,
+  });
+  $('#ih-install', sheet)?.addEventListener('click', () => { closeSheet(); promptInstall(); });
+  $('#ih-show', sheet)?.addEventListener('click', () => { setInstallDismissed(false); closeSheet(); render(); });
 }
 
 // MARK: - 專案內頁
